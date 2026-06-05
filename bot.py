@@ -479,17 +479,12 @@ async def send_prepare_cb(event):
         "recipients": [r["guid"] for r in ordered],
     }
 
-    names = "، ".join(r["name"] for r in ordered[:10])
-    if len(ordered) > 10:
-        names += f" و {len(ordered) - 10} نفر دیگر"
     await event.edit(
         card("🚀 آماده‌ی ارسال", [
             f"📎 محتوا : پیام نشان‌دار «{marker}» ✅",
             f"🎯 گیرنده‌ها : {len(ordered)} مخاطب",
             "ترتیب : چت‌دار ← آنلاین ← Last Seen",
             LINE,
-            f"👤 {names}",
-            "",
             "به این مخاطب‌ها ارسال بشه؟",
         ]),
         buttons=[[Button.inline("✅ تأیید و ارسال", f"go_{account_id}".encode())],
