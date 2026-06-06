@@ -80,6 +80,11 @@ def _build_app():
         phone: str
         marker: str
 
+    # ----- ping (NO token; just proves the API process is alive) -----
+    @app.get("/ping")
+    async def ping():
+        return {"ok": True, "service": "v2rubby-worker"}
+
     # ----- health -----
     @app.get("/health")
     async def health(authorization: str = Header(None)):
