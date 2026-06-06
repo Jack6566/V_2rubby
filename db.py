@@ -52,6 +52,54 @@ def init():
         "INSERT OR IGNORE INTO settings (id, send_delay, marker) VALUES (1, ?, ?)",
         (config.DEFAULT_DELAY, config.FORWARD_MARKER),
     )
+
+    # ---- Worker subsystem tables (additive; never touches the originals) ----
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workers (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tag          TEXT UNIQUE,
+            ip           TEXT,
+            ssh_port     INTEGER DEFAULT 22,
+            ssh_user     TEXT,
+            ssh_pass_enc TEXT,
+            api_port     INTEGER,
+            api_token_enc TEXT,
+            is_master    INTEGER DEFAULT 0,
+            enabled      INTEGER DEFAULT 1,
+            status       TEXT DEFAULT 'unknown',
+            ping_ms      INTEGER DEFAULT -1,
+            file_ok      INTEGER DEFAULT 0,
+            last_checked TEXT,
+            created_at   TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS admins (
+            user_id  INTEGER PRIMARY KEY,
+            name     TEXT,
+            added_at TEXT
+        )
+        """
+    )
+    c.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worker_daily (
+            worker_id INTEGER,
+            day       TEXT,
+            sent      INTEGER DEFAULT 0,
+            PRIMARY KEY (worker_id, day)
+        )
+        """
+    )
+
+    # ---- migration: add accounts.worker_id (account -> worker affinity) ----
+    cols = [r["name"] for r in c.execute("PRAGMA table_info(accounts)").fetchall()]
+    if "worker_id" not in cols:
+        c.execute("ALTER TABLE accounts ADD COLUMN worker_id INTEGER")
+
     conn.commit()
     conn.close()
 
@@ -139,3 +187,173 @@ def set_marker(marker: str):
     conn.execute("UPDATE settings SET marker = ? WHERE id = 1", (marker.strip(),))
     conn.commit()
     conn.close()
+
+
+
+# --------------------------------------------------------------------------- #
+# Admins (extra Telegram ids allowed to use the panel, added by the owner).
+# OWNER_ID is always allowed and is NOT stored here.
+# --------------------------------------------------------------------------- #
+def add_admin(user_id: int, name: str = ""):
+    conn = _conn()
+    conn.execute(
+        "INSERT OR REPLACE INTO admins (user_id, name, added_at) VALUES (?, ?, ?)",
+        (int(user_id), name or "", _now()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_admin(user_id: int):
+    conn = _conn()
+    conn.execute("DELETE FROM admins WHERE user_id = ?", (int(user_id),))
+    conn.commit()
+    conn.close()
+
+
+def list_admins() -> list:
+    conn = _conn()
+    rows = conn.execute("SELECT * FROM admins ORDER BY added_at").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_admin_ids() -> list:
+    return [int(a["user_id"]) for a in list_admins()]
+
+
+# --------------------------------------------------------------------------- #
+# Workers
+# --------------------------------------------------------------------------- #
+def add_worker(tag: str, ip: str, ssh_port: int, ssh_user: str,
+               ssh_pass_enc: str, api_port: int, api_token_enc: str,
+               is_master: int = 0) -> int:
+    conn = _conn()
+    c = conn.cursor()
+    c.execute(
+        """
+        INSERT INTO workers (tag, ip, ssh_port, ssh_user, ssh_pass_enc,
+                             api_port, api_token_enc, is_master, enabled,
+                             status, ping_ms, file_ok, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 'unknown', -1, 0, ?)
+        """,
+        (tag, ip, int(ssh_port or 22), ssh_user, ssh_pass_enc,
+         int(api_port), api_token_enc, int(is_master), _now()),
+    )
+    conn.commit()
+    wid = c.lastrowid
+    conn.close()
+    return wid
+
+
+def list_workers() -> list:
+    conn = _conn()
+    rows = conn.execute("SELECT * FROM workers ORDER BY id").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def list_enabled_workers() -> list:
+    conn = _conn()
+    rows = conn.execute(
+        "SELECT * FROM workers WHERE enabled = 1 ORDER BY id"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_worker(worker_id: int):
+    conn = _conn()
+    row = conn.execute("SELECT * FROM workers WHERE id = ?", (int(worker_id),)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_worker_by_tag(tag: str):
+    conn = _conn()
+    row = conn.execute("SELECT * FROM workers WHERE tag = ?", (tag,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_master_worker():
+    conn = _conn()
+    row = conn.execute("SELECT * FROM workers WHERE is_master = 1 LIMIT 1").fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def delete_worker(worker_id: int):
+    conn = _conn()
+    conn.execute("DELETE FROM workers WHERE id = ?", (int(worker_id),))
+    conn.execute("DELETE FROM worker_daily WHERE worker_id = ?", (int(worker_id),))
+    # detach accounts that were bound to this worker
+    conn.execute("UPDATE accounts SET worker_id = NULL WHERE worker_id = ?",
+                 (int(worker_id),))
+    conn.commit()
+    conn.close()
+
+
+def set_worker_enabled(worker_id: int, enabled: bool):
+    conn = _conn()
+    conn.execute("UPDATE workers SET enabled = ? WHERE id = ?",
+                 (1 if enabled else 0, int(worker_id)))
+    conn.commit()
+    conn.close()
+
+
+def update_worker_health(worker_id: int, status: str, ping_ms: int, file_ok: bool):
+    conn = _conn()
+    conn.execute(
+        "UPDATE workers SET status = ?, ping_ms = ?, file_ok = ?, last_checked = ? "
+        "WHERE id = ?",
+        (status, int(ping_ms), 1 if file_ok else 0, _now(), int(worker_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def count_accounts_on_worker(worker_id: int) -> int:
+    conn = _conn()
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM accounts WHERE worker_id = ?", (int(worker_id),)
+    ).fetchone()
+    conn.close()
+    return int(row["n"]) if row else 0
+
+
+def set_account_worker(account_id: int, worker_id):
+    conn = _conn()
+    conn.execute("UPDATE accounts SET worker_id = ? WHERE id = ?",
+                 (worker_id, int(account_id)))
+    conn.commit()
+    conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Per-worker daily send counter (no cap; informational + routing hint).
+# --------------------------------------------------------------------------- #
+def _today() -> str:
+    return config.now_dt().strftime("%Y-%m-%d")
+
+
+def incr_worker_sent(worker_id: int, n: int = 1):
+    conn = _conn()
+    day = _today()
+    conn.execute(
+        "INSERT INTO worker_daily (worker_id, day, sent) VALUES (?, ?, ?) "
+        "ON CONFLICT(worker_id, day) DO UPDATE SET sent = sent + ?",
+        (int(worker_id), day, int(n), int(n)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def worker_sent_today(worker_id: int) -> int:
+    conn = _conn()
+    row = conn.execute(
+        "SELECT sent FROM worker_daily WHERE worker_id = ? AND day = ?",
+        (int(worker_id), _today()),
+    ).fetchone()
+    conn.close()
+    return int(row["sent"]) if row else 0
