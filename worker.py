@@ -453,10 +453,10 @@ async def pick_worker_for_login(verify: bool = True) -> dict:
     as accounts are added one at a time). Verifies health right before use.
     Returns a worker dict or None if none are usable.
     """
+    # Make sure a master row exists (creates it once if missing), but routing
+    # uses only ENABLED workers, so a disabled local master is respected.
+    ensure_master_worker()
     workers = db.list_enabled_workers()
-    if not workers:
-        m = ensure_master_worker()
-        workers = [m] if m else []
     if not workers:
         return None
 

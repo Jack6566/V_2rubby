@@ -1067,7 +1067,11 @@ async def provision_and_register(event, wk):
     wid = await worker.register_provisioned(wk["ip"], wk.get("port", 22),
                                             wk["user"], wk["pass"], prov)
     w = db.get_worker(wid)
-    # CHECK the worker right after install, before declaring it usable.
+    # Give the freshly started container time to fully come up before the
+    # first health check; checking immediately on connect gave a misleading
+    # status. Wait 20s, then verify.
+    await msg.edit("⏳ ورکر نصب شد. ۲۰ ثانیه صبر برای آماده‌شدن کامل و بررسی وضعیت ...")
+    await asyncio.sleep(20)
     try:
         await worker.check_worker(w)
     except Exception:
@@ -1110,6 +1114,11 @@ async def wk_detail_cb(event):
                      Button.inline("♻️ ری‌استارت", f"wkrst_{wid}".encode())])
         rows.append([Button.inline("⬆️ آپدیت", f"wkupd_{wid}".encode()),
                      Button.inline("🗑 حذف", f"wkdel_{wid}".encode())])
+    else:
+        # Local master worker: only allow enabling/disabling it as a worker
+        # (no remote restart/update/teardown — it runs in-process).
+        toggle = "⏸ خاموش‌کردن لوکال" if w["enabled"] else "▶️ روشن‌کردن لوکال"
+        rows.append([Button.inline(toggle, f"wktog_{wid}".encode())])
     rows.append([Button.inline("🔄 بررسی این ورکر", f"wkchk_{wid}".encode())])
     rows.append([Button.inline("🔙 بازگشت", b"workers")])
     await event.edit("\n".join(lines), buttons=rows)
