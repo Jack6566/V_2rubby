@@ -42,6 +42,8 @@ _tunnels: dict = {}
 _tunnel_locks: dict = {}
 # in-memory health cache: worker_id -> {"status","ping_ms","file_ok","ts"}
 _health_cache: dict = {}
+# in-memory last failure reason per worker (diagnostic), worker_id -> str|None
+_health_detail: dict = {}
 
 
 # --------------------------------------------------------------------------- #
@@ -381,18 +383,27 @@ async def check_worker(worker: dict) -> dict:
     else:
         ping = await _tcp_ping(worker["ip"], worker["ssh_port"])
         file_ok = False
-        if ping >= 0:
+        detail = None
+        if ping < 0:
+            detail = "ssh unreachable"
+        else:
             try:
-                data = await api_call(worker, "GET", "/health", timeout=config.HEALTH_TIMEOUT + 10)
+                data = await api_call(worker, "GET", "/health",
+                                      timeout=config.HEALTH_TIMEOUT + 10)
                 file_ok = bool(data.get("file_ok"))
-            except Exception:
-                file_ok = False
+                if not file_ok:
+                    # API answered but Rubika check failed -> show its status code
+                    detail = f"rubika http={data.get('status_code')}"
+            except Exception as e:  # noqa: BLE001
+                # API itself unreachable through the tunnel
+                detail = f"api error: {type(e).__name__}: {str(e)[:120]}"
+        _health_detail[wid] = detail
 
     status = "ok" if (ping >= 0 and file_ok) else ("blocked" if ping >= 0 else "down")
     db.update_worker_health(wid, status, ping, file_ok)
     summary = {"id": wid, "tag": worker["tag"], "ip": worker["ip"],
                "status": status, "ping_ms": ping, "file_ok": file_ok,
-               "ts": config.now_str()}
+               "detail": _health_detail.get(wid), "ts": config.now_str()}
     _health_cache[wid] = summary
     return summary
 
@@ -410,10 +421,16 @@ async def check_all(workers: list = None) -> list:
         if isinstance(r, Exception):
             out.append({"id": w["id"], "tag": w["tag"], "ip": w["ip"],
                         "status": "down", "ping_ms": -1, "file_ok": False,
+                        "detail": f"check crashed: {type(r).__name__}",
                         "ts": config.now_str()})
         else:
             out.append(r)
     return out
+
+
+def health_detail(worker_id: int):
+    """Last diagnostic reason for a worker being unhealthy (or None)."""
+    return _health_detail.get(worker_id)
 
 
 def cached_health(worker_id: int):

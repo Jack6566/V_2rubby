@@ -937,19 +937,29 @@ def worker_status_all_card(workers) -> str:
         lines.append(f"🖥 {w['ip']} {w['tag']}")
         lines.append(LINE)
         lines.append(f"{worker.status_emoji(w)} {w['ip']} -{_ping_text(w)} - {worker.file_label(w)}")
+        # When unhealthy, show the diagnostic reason so the cause is visible.
+        if not w.get("file_ok"):
+            d = worker.health_detail(w["id"])
+            if d:
+                lines.append(f"ℹ️ {d}")
         lines.append(LINE)
     lines.append(f"🕒 {now()}")
     return "\n".join(lines)
 
 
 def added_worker_card(w) -> str:
-    return "\n".join([
+    rows = [
         "🛠 ADDED WORKER", LINE,
         f"🖥 {w['ip']} {w['tag']}", LINE,
         "🛠 Statu Worker", LINE,
-        f"{worker.status_emoji(w)} {w['ip']} -{_ping_text(w)} - {worker.file_label(w)}", LINE,
-        f"🕒 {now()}",
-    ])
+        f"{worker.status_emoji(w)} {w['ip']} -{_ping_text(w)} - {worker.file_label(w)}",
+    ]
+    if not w.get("file_ok"):
+        d = worker.health_detail(w["id"])
+        if d:
+            rows.append(f"ℹ️ {d}")
+    rows += [LINE, f"🕒 {now()}"]
+    return "\n".join(rows)
 
 
 async def log_status_all(refresh: bool = True):
