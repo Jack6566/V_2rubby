@@ -168,6 +168,9 @@ async def provision_worker(ip: str, ssh_port: int, ssh_user: str, ssh_pass: str,
             "MODE=worker\n"
             f"WORKER_API_TOKEN={api_token}\n"
             f"WORKER_API_PORT={api_port}\n"
+            # With host networking the API binds to the host's loopback, which
+            # is private (only the master's SSH tunnel reaches it).
+            "WORKER_BIND_HOST=127.0.0.1\n"
             f"TIMEZONE={config.TIMEZONE}\n"
         )
         # write .env safely via a heredoc
@@ -188,10 +191,15 @@ async def provision_worker(ip: str, ssh_port: int, ssh_user: str, ssh_pass: str,
                     "error": f"docker build شکست خورد: {(err or out)[-600:]}"}
 
         await say("🚀 اجرای کانتینر ورکر ...")
+        # --network=host so the container uses the SERVER's DNS/network. The
+        # default bridge network has broken DNS on many fresh servers, which
+        # would make the worker unable to resolve Rubika (-> always "Blocked").
+        # With host networking, WORKER_BIND_HOST=127.0.0.1 keeps the API private
+        # (only the master's SSH tunnel can reach it).
         run_cmd = (
             f"docker rm -f {CONTAINER} 2>/dev/null; "
             f"docker run -d --name {CONTAINER} --restart always "
-            f"-p 127.0.0.1:{api_port}:{api_port} "
+            f"--network=host "
             f"--env-file {REMOTE_DIR}/.env "
             f"-v {REMOTE_DATA}:/app/data {IMAGE}"
         )
@@ -248,7 +256,7 @@ async def update_worker(worker: dict) -> tuple:
             f"cd {REMOTE_DIR} && git pull && docker build --network=host -t {IMAGE} . && "
             f"docker rm -f {CONTAINER} 2>/dev/null; "
             f"docker run -d --name {CONTAINER} --restart always "
-            f"-p 127.0.0.1:{worker['api_port']}:{worker['api_port']} "
+            f"--network=host "
             f"--env-file {REMOTE_DIR}/.env -v {REMOTE_DATA}:/app/data {IMAGE}"
         )
         return await _run(conn, cmd)

@@ -10,8 +10,10 @@ services:
     build: .
     container_name: v2rubby-worker
     restart: always
+    # host networking so the container uses the server's DNS/network (the
+    # default bridge network has broken DNS on many fresh servers). The API
+    # stays private via WORKER_BIND_HOST=127.0.0.1 in .env.
+    network_mode: host
     env_file: .env
-    ports:
-      - "127.0.0.1:8765:8765"
     volumes:
       - ./data:/app/data
