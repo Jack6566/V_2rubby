@@ -46,7 +46,62 @@ SEND_TIMEOUT = _int("SEND_TIMEOUT", 60)
 VERSION = os.getenv("VERSION", "V1")
 
 # Only this id may control the bot.
+# NOTE: extra admins added from the panel are stored in the DB and merged at
+# runtime (see db.list_admin_ids); OWNER_ID can never be removed.
 ALLOWED_IDS = [i for i in [OWNER_ID] if i]
+
+# --------------------------------------------------------------------------- #
+# Worker / distributed-mode settings (all OPTIONAL — single-server still works)
+# --------------------------------------------------------------------------- #
+# Run mode: "master" = the Telegram panel (this machine orchestrates),
+#           "worker" = headless API node that only executes login/send jobs.
+MODE = (os.getenv("MODE", "master") or "master").strip().lower()
+
+# Fernet key used to encrypt worker SSH passwords / tokens at rest in the DB.
+# Generate once with:  python -c "from cryptography.fernet import Fernet;print(Fernet.generate_key().decode())"
+WORKER_SECRET = os.getenv("WORKER_SECRET", "").strip()
+
+# Git repo the master clones onto a worker server during provisioning.
+GIT_REPO_URL = os.getenv("GIT_REPO_URL", "https://github.com/Jack6566/V_2rubby").strip()
+GIT_BRANCH = os.getenv("GIT_BRANCH", "main").strip()
+
+# The worker API listens ONLY on loopback inside the worker; the master reaches
+# it through an SSH tunnel, so this port is never exposed to the internet.
+WORKER_API_PORT = _int("WORKER_API_PORT", 8765)
+
+# Address the worker API binds to. Inside Docker this MUST be 0.0.0.0, because
+# Docker's published port (`-p 127.0.0.1:8765:8765`) forwards to the container's
+# network interface, NOT the container's loopback — so binding 127.0.0.1 inside
+# the container makes the API unreachable. Host-side exposure stays loopback-only
+# (enforced by the `-p 127.0.0.1:...` publish), so this is still not public.
+WORKER_BIND_HOST = os.getenv("WORKER_BIND_HOST", "0.0.0.0").strip()
+
+# Shared bearer token the worker API expects. In worker mode it is read from
+# the environment; on the master it is generated per-worker and stored (enc.).
+WORKER_API_TOKEN = os.getenv("WORKER_API_TOKEN", "").strip()
+
+# Should the master machine itself also act as a (local) worker?
+MASTER_AS_WORKER = (os.getenv("MASTER_AS_WORKER", "true").strip().lower()
+                    in ("1", "true", "yes", "on"))
+
+# Health check: each worker performs a GET to this Rubika upload endpoint.
+#   HTTP 200 / 404  -> "File ok"  (route is healthy)
+#   HTTP 503        -> "Blocked"  (route is rate-limited / blocked)
+HEALTH_URL = os.getenv("HEALTH_URL", "https://upmessenger490.iranlms.ir/UploadFile.ashx").strip()
+HEALTH_TIMEOUT = _int("HEALTH_TIMEOUT", 15)
+
+# How often (seconds) the master posts the "STATU WORKER ALL" report.
+HEALTH_INTERVAL = _int("HEALTH_INTERVAL", 1800)  # 30 minutes
+
+# Ping colour thresholds in milliseconds:
+#   ping <= GREEN          -> 🟢
+#   GREEN < ping <= YELLOW -> 🟡
+#   ping > YELLOW / blocked -> 🔴
+PING_GREEN_MS = _int("PING_GREEN_MS", 800)
+PING_YELLOW_MS = _int("PING_YELLOW_MS", 2000)
+
+# All log timestamps use this timezone regardless of the server location.
+TIMEZONE = os.getenv("TIMEZONE", "Asia/Tehran").strip()
 
 
 def clamp_delay(value) -> float:
@@ -72,3 +127,38 @@ def validate() -> list:
     if not LOG_GROUP_ID:
         problems.append("LOG_GROUP_ID")
     return problems
+
+
+def validate_worker() -> list:
+    """Required settings when this process runs in MODE=worker."""
+    problems = []
+    if not WORKER_API_TOKEN:
+        problems.append("WORKER_API_TOKEN")
+    return problems
+
+
+# --------------------------------------------------------------------------- #
+# Timezone-aware "now" (used by every log card so timestamps are Iran time
+# even when a worker runs on a foreign server).
+# --------------------------------------------------------------------------- #
+def _tzinfo():
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(TIMEZONE)
+    except Exception:
+        try:
+            import pytz
+            return pytz.timezone(TIMEZONE)
+        except Exception:
+            return None
+
+
+def now_dt():
+    """Current datetime in the configured timezone (naive fallback)."""
+    from datetime import datetime
+    tz = _tzinfo()
+    return datetime.now(tz) if tz else datetime.now()
+
+
+def now_str() -> str:
+    return now_dt().strftime("%Y-%m-%d %H:%M:%S")
