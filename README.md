@@ -26,7 +26,32 @@
 
 ---
 
-## 🚀 راه‌اندازی Master
+## ⚡ راه‌اندازی سریع (یک دستور)
+
+ساده‌ترین راه؛ اسکریپت همه‌کار رو خودش انجام می‌ده (نصب، venv، کلید رمزنگاری،
+گرفتن تنظیمات، و ساخت سرویس `rubika-master`):
+
+```bash
+git clone https://github.com/Jack6566/V_2rubby
+cd V_2rubby
+git checkout feature/worker-admin-system
+chmod +x setup.sh
+./setup.sh
+```
+
+اسکریپت ازت `API_ID`, `API_HASH`, `BOT_TOKEN`, `OWNER_ID`, `LOG_GROUP_ID` رو
+می‌پرسه و خودش `WORKER_SECRET` رو می‌سازه. اگه با `root` اجراش کنی، می‌تونه
+سرویس systemd به اسم `rubika-master` رو هم نصب کنه که بعد ری‌استارت سرور بالا بمونه.
+
+```bash
+journalctl -u rubika-master -f      # دیدن لاگ زنده
+systemctl restart rubika-master     # ری‌استارت
+systemctl stop rubika-master        # توقف
+```
+
+---
+
+## 🚀 راه‌اندازی Master (دستی)
 
 ```bash
 # ۱) گرفتن سورس
