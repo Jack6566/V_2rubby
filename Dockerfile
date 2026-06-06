@@ -28,6 +28,8 @@ COPY . /app
 # survive container restarts and updates.
 RUN mkdir -p /app/data
 ENV MODE=worker
+# Unbuffered stdout/stderr so `docker logs` shows output immediately.
+ENV PYTHONUNBUFFERED=1
 
 # The worker API listens on this port (loopback-published by the master).
 EXPOSE 8765

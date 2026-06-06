@@ -69,6 +69,13 @@ GIT_BRANCH = os.getenv("GIT_BRANCH", "main").strip()
 # it through an SSH tunnel, so this port is never exposed to the internet.
 WORKER_API_PORT = _int("WORKER_API_PORT", 8765)
 
+# Address the worker API binds to. Inside Docker this MUST be 0.0.0.0, because
+# Docker's published port (`-p 127.0.0.1:8765:8765`) forwards to the container's
+# network interface, NOT the container's loopback — so binding 127.0.0.1 inside
+# the container makes the API unreachable. Host-side exposure stays loopback-only
+# (enforced by the `-p 127.0.0.1:...` publish), so this is still not public.
+WORKER_BIND_HOST = os.getenv("WORKER_BIND_HOST", "0.0.0.0").strip()
+
 # Shared bearer token the worker API expects. In worker mode it is read from
 # the environment; on the master it is generated per-worker and stored (enc.).
 WORKER_API_TOKEN = os.getenv("WORKER_API_TOKEN", "").strip()

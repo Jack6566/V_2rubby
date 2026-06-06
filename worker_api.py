@@ -244,8 +244,9 @@ def run():
         return
     import uvicorn
     app = _build_app()
-    print(f"Worker API listening on 127.0.0.1:{config.WORKER_API_PORT}")
-    uvicorn.run(app, host="127.0.0.1", port=config.WORKER_API_PORT, log_level="warning")
+    host = config.WORKER_BIND_HOST or "0.0.0.0"
+    print(f"Worker API listening on {host}:{config.WORKER_API_PORT}", flush=True)
+    uvicorn.run(app, host=host, port=config.WORKER_API_PORT, log_level="info")
 
 
 if __name__ == "__main__":
