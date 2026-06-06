@@ -15,9 +15,11 @@ WORKDIR /app
 
 # Install Python deps first (better layer caching).
 COPY requirements.txt /app/requirements.txt
-# Upgrade pip so it always prefers manylinux wheels (no compiler needed).
+# Upgrade pip so it always prefers manylinux wheels (no compiler needed), and
+# give pip extra retries / a longer timeout for slow or flaky networks.
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir --retries 10 --timeout 120 \
+       -i https://pypi.org/simple -r requirements.txt
 
 # App source.
 COPY . /app

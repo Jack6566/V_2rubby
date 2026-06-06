@@ -178,9 +178,14 @@ async def provision_worker(ip: str, ssh_port: int, ssh_user: str, ssh_pass: str,
         )
 
         await say("🏗 ساخت ایمیج Docker (ممکنه چند دقیقه طول بکشه) ...")
-        code, out, err = await _run(conn, f"cd {REMOTE_DIR} && docker build -t {IMAGE} .")
+        # --network=host lets build steps use the SERVER's network/DNS, which
+        # avoids the common "Docker build container can't resolve DNS / reach
+        # PyPI" failure on fresh servers.
+        code, out, err = await _run(
+            conn, f"cd {REMOTE_DIR} && docker build --network=host -t {IMAGE} .")
         if code != 0:
-            return {"ok": False, "error": f"docker build شکست خورد: {err[-200:] or out[-200:]}"}
+            return {"ok": False,
+                    "error": f"docker build شکست خورد: {(err or out)[-600:]}"}
 
         await say("🚀 اجرای کانتینر ورکر ...")
         run_cmd = (
@@ -240,7 +245,7 @@ async def update_worker(worker: dict) -> tuple:
     conn = await _with_conn(worker)
     try:
         cmd = (
-            f"cd {REMOTE_DIR} && git pull && docker build -t {IMAGE} . && "
+            f"cd {REMOTE_DIR} && git pull && docker build --network=host -t {IMAGE} . && "
             f"docker rm -f {CONTAINER} 2>/dev/null; "
             f"docker run -d --name {CONTAINER} --restart always "
             f"-p 127.0.0.1:{worker['api_port']}:{worker['api_port']} "
